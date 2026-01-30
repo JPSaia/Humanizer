@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: ai-humanizer-api
+    env: python
+    region: oregon  # Options: oregon, ohio, frankfurt, singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: DEEPSEEK_API_KEY
+        sync: false
+    plan: free
+    autoDeploy: true
