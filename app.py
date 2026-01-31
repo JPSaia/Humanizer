@@ -1,9 +1,17 @@
+import os
+
+# REMOVE PROXY ENVIRONMENT VARIABLES FIRST THING
+# This prevents OpenAI client from seeing them
+for key in list(os.environ.keys()):
+    if 'proxy' in key.lower():
+        print(f"Removing proxy environment variable: {key}")
+        del os.environ[key]
+
+# NOW import other modules
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import os
 import re
 from openai import OpenAI
-from functools import lru_cache
 import hashlib
 import time
 
@@ -19,48 +27,11 @@ def get_deepseek_client():
     if not api_key:
         raise ValueError("DEEPSEEK_API_KEY not set")
     
-    # Get ALL environment variables
-    env_vars = dict(os.environ)
-    
-    # Check for any proxy-related variables
-    proxy_vars = [key for key in env_vars if 'proxy' in key.lower()]
-    if proxy_vars:
-        print(f"Found proxy variables: {proxy_vars}")
-        # You might want to remove them from the environment
-        # or handle them differently
-    
-    # Explicitly create client with only allowed parameters
-    try:
-        client = OpenAI(
-            api_key=api_key,
-            base_url="https://api.deepseek.com/v1"
-        )
-        return client
-    except TypeError as e:
-        print(f"Error creating client: {e}")
-        # Try alternative approach - remove problematic env vars
-        import copy
-        import openai
-        
-        # Temporarily remove problematic environment variables
-        original_env = copy.deepcopy(os.environ)
-        for key in proxy_vars:
-            if key in os.environ:
-                del os.environ[key]
-        
-        try:
-            client = OpenAI(
-                api_key=api_key,
-                base_url="https://api.deepseek.com/v1"
-            )
-            # Restore environment
-            os.environ.clear()
-            os.environ.update(original_env)
-            return client
-        finally:
-            # Make sure to restore
-            os.environ.clear()
-            os.environ.update(original_env)
+    # Clean and simple - proxies already removed at the top
+    return OpenAI(
+        api_key=api_key,
+        base_url="https://api.deepseek.com/v1"
+    )
 
 def humanize_text_with_deepseek(ai_text):
     """Your exact humanization logic from Cursor"""
