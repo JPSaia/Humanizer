@@ -1,19 +1,35 @@
 import os
+import sys
 
-# REMOVE PROXY ENVIRONMENT VARIABLES FIRST THING
-# This prevents OpenAI client from seeing them
-for key in list(os.environ.keys()):
-    if 'proxy' in key.lower():
-        print(f"Removing proxy environment variable: {key}")
-        del os.environ[key]
+# NUCLEAR OPTION: Completely clean environment
+# Save critical variables
+critical_vars = {
+    'DEEPSEEK_API_KEY': os.environ.get('DEEPSEEK_API_KEY'),
+    'PATH': os.environ.get('PATH', ''),
+    'HOME': os.environ.get('HOME', ''),
+    'LANG': os.environ.get('LANG', 'en_US.UTF-8'),
+    'PORT': os.environ.get('PORT', '10000'),
+}
+
+# Clear ALL environment variables
+os.environ.clear()
+
+# Restore only the critical ones
+for key, value in critical_vars.items():
+    if value:
+        os.environ[key] = value
+
+print("Environment cleaned. Current env vars:", list(os.environ.keys()))
 
 # NOW import other modules
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import re
-from openai import OpenAI
 import hashlib
 import time
+
+# Import OpenAI LAST
+from openai import OpenAI
 
 app = Flask(__name__)
 CORS(app)  # Allow requests from your WordPress site
@@ -22,16 +38,93 @@ CORS(app)  # Allow requests from your WordPress site
 response_cache = {}
 
 def get_deepseek_client():
-    """Get DeepSeek API client with error handling"""
+    """Get DeepSeek API client - nuclear fix for proxy issues"""
     api_key = os.getenv('DEEPSEEK_API_KEY')
     if not api_key:
         raise ValueError("DEEPSEEK_API_KEY not set")
     
-    # Clean and simple - proxies already removed at the top
-    return OpenAI(
-        api_key=api_key,
-        base_url="https://api.deepseek.com/v1"
-    )
+    print(f"DEEPSEEK_API_KEY: {'*' * 10}{api_key[-4:] if len(api_key) > 4 else ''}")
+    
+    # Method 1: Try direct instantiation first
+    try:
+        print("Attempt 1: Direct OpenAI instantiation")
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://api.deepseek.com/v1"
+        )
+        print("Success with direct instantiation")
+        return client
+    except TypeError as e:
+        print(f"Direct failed: {e}")
+    
+    # Method 2: Use the lower-level API
+    try:
+        print("Attempt 2: Using OpenAI with http_client")
+        import httpx
+        
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://api.deepseek.com/v1",
+            http_client=httpx.Client(
+                timeout=30.0,
+                # Explicitly NO proxies
+            )
+        )
+        print("Success with httpx client")
+        return client
+    except Exception as e:
+        print(f"HTTPX method failed: {e}")
+    
+    # Method 3: Manual requests as last resort
+    print("Attempt 3: Manual requests fallback")
+    
+    class ManualDeepSeekClient:
+        def __init__(self, api_key):
+            self.api_key = api_key
+            self.base_url = "https://api.deepseek.com/v1"
+            
+        def chat_completions_create(self, model, messages, temperature=0.7, max_tokens=2000):
+            import requests
+            import json
+            
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            }
+            
+            data = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json=data,
+                timeout=30
+            )
+            response.raise_for_status()
+            return type('obj', (object,), {
+                'choices': [type('obj', (object,), {
+                    'message': type('obj', (object,), {
+                        'content': response.json()['choices'][0]['message']['content']
+                    })()
+                })()]
+            })()
+    
+    # Create wrapper to match OpenAI interface
+    class ClientWrapper:
+        def __init__(self):
+            self.chat = type('obj', (object,), {
+                'completions': type('obj', (object,), {
+                    'create': ManualDeepSeekClient(api_key).chat_completions_create
+                })()
+            })()
+    
+    print("Using manual requests fallback")
+    return ClientWrapper()
 
 def humanize_text_with_deepseek(ai_text):
     """Your exact humanization logic from Cursor"""
